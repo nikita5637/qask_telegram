@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"os"
 	"qask_telegram/internal/app/store"
 	"qask_telegram/internal/app/store/cache"
 
@@ -24,14 +25,22 @@ type tgbot struct {
 }
 
 //Start ...
-func Start(token string) error {
+func Start(token string, config *Config) error {
 	bot, err := startBot(token)
 	if err != nil {
 		return err
 	}
 
 	logger := logrus.New()
-	level, err := logrus.ParseLevel("debug")
+	if config.LogFile != "" {
+		logFile, err := os.OpenFile(config.LogFile, os.O_WRONLY|os.O_CREATE, 0755)
+		if err != nil {
+			return err
+		}
+		logger.SetOutput(logFile)
+	}
+
+	level, err := logrus.ParseLevel(config.LogLevel)
 	if err != nil {
 		return err
 	}
@@ -43,8 +52,8 @@ func Start(token string) error {
 	bot.logger = logger
 	bot.store = st
 
-	bot.callBackQueryHandler = newCallBackQueryHandler(bot.bot, logger, st)
-	bot.messageHandler = newMessageHandler(bot.bot, logger, st)
+	bot.callBackQueryHandler = newCallBackQueryHandler(bot.bot, config, logger, st)
+	bot.messageHandler = newMessageHandler(bot.bot, config, logger, st)
 
 	for update := range *bot.updChan {
 		if update.CallbackQuery == nil && update.Message == nil && update.ChannelPost == nil {

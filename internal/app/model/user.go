@@ -2,7 +2,8 @@ package model
 
 import (
 	"errors"
-	"github.com/go-telegram-bot-api/telegram-bot-api"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
 type userPublic struct {
@@ -23,6 +24,7 @@ type userPrivate struct {
 	ProfileMessageHead      *Message
 	PlayMessage             tgbotapi.Message
 	PlayMessageHead         *Message
+	ReportMessage           string
 	QuestionMessage         tgbotapi.Message
 	Question                *Question
 	WriteTo                 *string

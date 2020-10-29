@@ -3,6 +3,7 @@ package model
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 )
@@ -13,7 +14,7 @@ type Question struct {
 	Comment  string `json:"comment"`
 }
 
-func GetQuestion(user *User) *Question {
+func GetQuestion(user *User, qaskIP, qaskPort string) *Question {
 	type request struct {
 		TgId int64  `json:"tgId"`
 		From string `json:"from"`
@@ -24,7 +25,7 @@ func GetQuestion(user *User) *Question {
 
 	b := &bytes.Buffer{}
 	json.NewEncoder(b).Encode(re)
-	req, _ := http.NewRequest(http.MethodGet, "http://172.20.0.3:30001/questions", b)
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s:%s/questions", qaskIP, qaskPort), b)
 
 	client := http.Client{}
 

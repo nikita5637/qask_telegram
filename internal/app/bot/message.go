@@ -1,6 +1,12 @@
 package bot
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/ioutil"
+	"net/http"
 	"qask_telegram/internal/app/model"
 	"qask_telegram/internal/app/router"
 	"qask_telegram/internal/app/store"
@@ -12,14 +18,16 @@ import (
 
 type messageHandler struct {
 	bot    *tgbotapi.BotAPI
+	config *Config
 	logger *logrus.Logger
 	router *router.Router
 	store  store.Store
 }
 
-func newMessageHandler(bot *tgbotapi.BotAPI, logger *logrus.Logger, store store.Store) *messageHandler {
+func newMessageHandler(bot *tgbotapi.BotAPI, config *Config, logger *logrus.Logger, store store.Store) *messageHandler {
 	mH := &messageHandler{
 		bot:    bot,
+		config: config,
 		logger: logger,
 		router: router.NewRouter(logger),
 		store:  store,
@@ -46,9 +54,53 @@ func (h *messageHandler) handleMessage(u *tgbotapi.Update) {
 
 	chatID := u.Message.Chat.ID
 	user := h.store.User().FindUser(int(chatID))
+	if user == nil {
+		errMsg := tgbotapi.NewMessage(chatID, "Ошибка! Неизвестная команда")
+		h.bot.Send(errMsg)
+		return
+	}
 
 	if user.WriteTo != nil {
 		*user.WriteTo = u.Message.Text
+		if user.WriteTo == &user.ReportMessage {
+			type request struct {
+				FirstName string `json:"firstName"`
+				UserName  string `json:"userName"`
+				TgID      int64  `json:"tgId"`
+				From      string `json:"from"`
+				Message   string `json:"message"`
+			}
+
+			req := &request{}
+			req.FirstName = user.FirstName
+			req.UserName = user.UserName
+			req.TgID = user.UserID()
+			req.From = "telegram"
+			req.Message = user.ReportMessage
+
+			b, _ := json.Marshal(req)
+			resp, err := http.Post(fmt.Sprintf("http://%s:%s/reports", h.config.QaskAddress, h.config.QaskPort), "application/json", bytes.NewReader(b))
+			if err != nil {
+				h.internalError(user.UserID(), err)
+				return
+			}
+
+			if resp.StatusCode != http.StatusCreated {
+				// Error while register
+				b, err := ioutil.ReadAll(resp.Body)
+				if err != nil {
+					// Internal telegram bot error
+					h.internalError(user.UserID(), err)
+					return
+				}
+
+				h.internalError(user.UserID(), errors.New(string(b)))
+				return
+			}
+
+			message := model.WelcomeMessageAfterSendingReport(user)
+			h.bot.Send(message.Msg)
+		}
 		user.WriteTo = nil
 	}
 }
@@ -156,10 +208,41 @@ func (h *messageHandler) handlePlay() router.RouterHandler {
 	h.logger.Debugf("Register handler 'Play'")
 
 	return func(user *model.User, u *tgbotapi.Update) {
-		//chatId := user.UserID()
 		if !user.Registered {
-			h.unavailableCommand(user.UserID())
-			return
+			type request struct {
+				From string `json:"from"`
+			}
+			re := &request{}
+			re.From = "telegram"
+
+			b := &bytes.Buffer{}
+			json.NewEncoder(b).Encode(re)
+			req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s:%s/users/tgid/%d", h.config.QaskAddress, h.config.QaskPort, u.Message.Chat.ID), b)
+
+			client := http.Client{}
+
+			resp, err := client.Do(req)
+			if err != nil {
+				h.unavailableCommand(user.UserID())
+				return
+			} else {
+				defer resp.Body.Close()
+
+				data, _ := ioutil.ReadAll(resp.Body)
+
+				us := model.User{}
+				err = json.Unmarshal(data, &us)
+				if err != nil {
+					h.unavailableCommand(user.UserID())
+					return
+				} else {
+					user = h.store.User().CreateUser(u.Message.From.ID)
+					user.UserName = us.UserName
+					user.FirstName = us.FirstName
+					user.Registered = true
+				}
+			}
+
 		}
 
 		/*
@@ -204,6 +287,11 @@ func (h *messageHandler) handleProfile() router.RouterHandler {
 		user.ProfileMessageHead = message
 		user.ProfileMessage, _ = h.bot.Send(message.Msg)
 	}
+}
+func (h *messageHandler) internalError(chatID int64, err error) {
+	errorMessage := fmt.Sprintf("Произошла внутренняя ошибка:\n\"%s\"\nПожалуйста, повторите попытку позже.", err)
+	msg := tgbotapi.NewMessage(chatID, errorMessage)
+	h.bot.Send(msg)
 }
 
 func (h *messageHandler) unavailableCommand(chatID int64) {

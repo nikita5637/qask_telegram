@@ -142,3 +142,12 @@ func WelcomeMessageAfterRegister(user *User) *Message {
 		Msg: &msg,
 	}
 }
+
+//WelcomeMessageAfterSendingReport ...
+func WelcomeMessageAfterSendingReport(user *User) *Message {
+	msg := tgbotapi.NewMessage(user.UserID(), "Ваше обращение получено. Спасибо!")
+
+	return &Message{
+		Msg: &msg,
+	}
+}

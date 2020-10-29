@@ -18,14 +18,16 @@ import (
 
 type callBackQueryHandler struct {
 	bot    *tgbotapi.BotAPI
+	config *Config
 	logger *logrus.Logger
 	router *router.Router
 	store  store.Store
 }
 
-func newCallBackQueryHandler(bot *tgbotapi.BotAPI, logger *logrus.Logger, store store.Store) *callBackQueryHandler {
+func newCallBackQueryHandler(bot *tgbotapi.BotAPI, config *Config, logger *logrus.Logger, store store.Store) *callBackQueryHandler {
 	cH := &callBackQueryHandler{
 		bot:    bot,
+		config: config,
 		logger: logger,
 		router: router.NewRouter(logger),
 		store:  store,
@@ -49,6 +51,7 @@ func (h *callBackQueryHandler) configureRouter() {
 	h.router.NewRoute("/settings", false, h.handleSettings())
 	h.router.NewRoute("/subscribtions", false, h.handleSubscriptions())
 	h.router.NewRoute("/back", false, h.handleBack())
+	h.router.NewRoute("/sendReport", false, h.handleSendReport())
 	h.router.NewRoute("/setFirstName", false, h.handleSetFirstName())
 	h.router.NewRoute("/setUserName", false, h.handleSetUserName())
 	h.logger.Debugf("Configuring callback commands router done")
@@ -63,6 +66,11 @@ func (h *callBackQueryHandler) handleCommand(u *tgbotapi.Update) {
 
 	chatID := u.CallbackQuery.Message.Chat.ID
 	user := h.store.User().FindUser(int(chatID))
+	if user == nil {
+		errMsg := tgbotapi.NewMessage(chatID, "Ошибка! Неизвестная команда")
+		h.bot.Send(errMsg)
+		return
+	}
 	if handler := h.router.GetHandler(u.CallbackQuery.Data); handler != nil {
 		handler(user, u)
 	} else {
@@ -99,7 +107,7 @@ func (h *callBackQueryHandler) handleRegisterUser() router.RouterHandler {
 
 		b, _ := json.Marshal(req)
 
-		resp, err := http.Post("http://172.20.0.3:30001/users", "application/json", bytes.NewReader(b))
+		resp, err := http.Post(fmt.Sprintf("http://%s:%s/users", h.config.QaskAddress, h.config.QaskPort), "application/json", bytes.NewReader(b))
 		if err != nil {
 			h.internalError(user.UserID(), err)
 			return
@@ -154,13 +162,12 @@ func (h *callBackQueryHandler) handleGetQuestion() router.RouterHandler {
 	h.logger.Debugf("Register callback handler 'GetQuestion'")
 
 	return func(user *model.User, u *tgbotapi.Update) {
-		question := model.GetQuestion(user)
+		question := model.GetQuestion(user, h.config.QaskAddress, h.config.QaskPort)
 		if question == nil {
 			return
 		}
 
 		user.Question = question
-
 		msg := tgbotapi.NewMessage(user.UserID(), user.Question.Question)
 
 		var rows = make([][]tgbotapi.InlineKeyboardButton, 0)
@@ -180,6 +187,10 @@ func (h *callBackQueryHandler) handleGetQuestion() router.RouterHandler {
 func (h *callBackQueryHandler) handleShowAnswer() router.RouterHandler {
 	h.logger.Debugf("Register callback handler 'ShowAnswer'")
 	return func(user *model.User, u *tgbotapi.Update) {
+		if user.QuestionMessage.MessageID == 0 {
+			return
+		}
+
 		msg := tgbotapi.NewEditMessageText(u.CallbackQuery.Message.Chat.ID, user.QuestionMessage.MessageID, user.Question.Answer)
 
 		var rows = make([][]tgbotapi.InlineKeyboardButton, 0)
@@ -289,6 +300,18 @@ func (h *callBackQueryHandler) handleSubscriptions() router.RouterHandler {
 		message.Prev = user.PlayMessageHead
 		user.PlayMessageHead = message
 		h.bot.Send(message.Msg)
+	}
+}
+
+func (h *callBackQueryHandler) handleSendReport() router.RouterHandler {
+	h.logger.Debugf("Register callback handler 'SendReport'")
+
+	return func(user *model.User, u *tgbotapi.Update) {
+		msg := tgbotapi.NewMessage(user.UserID(), "Окей, введите сообщение о проблеме")
+
+		user.WriteTo = &user.ReportMessage
+
+		h.bot.Send(msg)
 	}
 }
 
