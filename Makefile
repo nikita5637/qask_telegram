@@ -1,3 +1,6 @@
+build:
+	go build -v ./cmd/bot
+
 run:
 	go run ./cmd/bot
 
