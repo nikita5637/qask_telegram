@@ -122,7 +122,18 @@ func (h *callBackQueryHandler) handleRegisterUser() router.RouterHandler {
 				return
 			}
 
-			h.internalError(user.UserID(), errors.New(string(b)))
+			type qaskError struct {
+				ErrCode    int    `json:"errCode"`
+				ErrMessage string `json:"errMessage"`
+			}
+
+			var qe qaskError
+			if err := json.Unmarshal(b, &qe); err != nil {
+				fmt.Println(err)
+			}
+
+			e := fmt.Errorf("Код ошибки: %d\nОписание ошибки: %s\n", qe.ErrCode, qe.ErrMessage)
+			h.internalError(user.UserID(), e)
 			return
 		}
 
